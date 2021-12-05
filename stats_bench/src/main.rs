@@ -7,7 +7,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicPtr, AtomicUsize};
 use std::sync::Arc;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 use rand::Rng;
 
@@ -19,8 +19,12 @@ impl Drop for CountDrops {
 }
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
+static TOTAL_RETIRED: AtomicUsize = AtomicUsize::new(0);
 
 fn main() {
+    //Drop privileges so that can create files normally, while having priority with the scheduler
+    privdrop("troy", "troy").expect("Failed to drop privileges");
+
     let mut rng = rand::thread_rng();
 
     let mut values = Vec::new();
@@ -29,6 +33,7 @@ fn main() {
     const READER_HAZPTR_COUNT: usize = 1024 * 2;
     const READER_COUNT: usize = 4;
     const WRITER_COUNT: usize = 2;
+    const SAMPLE_SIZE: usize = 1024;
 
     //Fill buffer with random values
     for _ in 0..ptr_count {
@@ -46,39 +51,33 @@ fn main() {
                 let mut retire_count: usize = 0;
                 let mut rng = rand::thread_rng();
                 let mut times = Vec::new();
-                let mut last_average = None;
 
                 while RUNNING.load(Ordering::Relaxed) {
                     let start = Instant::now();
-                    for _ in 0..values.len() {
-                        let i = rng.gen_range(0..values.len());
-                        let new_num = rng.gen::<usize>();
-                        let new_ptr = Box::into_raw(Box::new(
-                            HazPtrObjectWrapper::with_global_domain(new_num),
-                        ));
 
-                        let ptr = &values[i];
-                        let now_garbage = ptr.swap(new_ptr, Ordering::AcqRel);
-                        // Safety:
-                        //
-                        //  1. The pointer came from Box, so is valid.
-                        //  2. The old value is no longer accessible.
-                        //  3. The deleter is valid for Box types.
-                        unsafe { now_garbage.retire(&deleters::drop_box) };
-                        retire_count += 1;
+                    for _ in 0..SAMPLE_SIZE {
+                        for _ in 0..values.len() {
+                            let i = rng.gen_range(0..values.len());
+                            let new_num = rng.gen::<usize>();
+                            let new_ptr = Box::into_raw(Box::new(
+                                HazPtrObjectWrapper::with_global_domain(new_num),
+                            ));
+
+                            let ptr = &values[i];
+                            let now_garbage = ptr.swap(new_ptr, Ordering::AcqRel);
+                            // Safety:
+                            //
+                            //  1. The pointer came from Box, so is valid.
+                            //  2. The old value is no longer accessible.
+                            //  3. The deleter is valid for Box types.
+                            unsafe { now_garbage.retire(&deleters::drop_box) };
+                            retire_count += 1;
+                        }
                     }
                     let time = start.elapsed().as_nanos() as u64 as f64 / 1_000.0;
                     times.push(time);
-
-                    const SAMPLE_SIZE: usize = 1024;
-                    if times.len() % SAMPLE_SIZE == 0 {
-                        let avg: f64 = &times[(times.len() - SAMPLE_SIZE)..].iter().sum::<f64>()
-                            / SAMPLE_SIZE as f64;
-                        if let Some(last) = last_average.take() {
-                            println!("Last {}, now {}", last, avg);
-                        }
-                        last_average = Some(avg);
-                    }
+ 
+                    println!("{}", time / SAMPLE_SIZE as f64 / values.len() as f64 * 1000.0);
                 }
                 (retire_count, times)
             })
@@ -119,7 +118,7 @@ fn main() {
     let start = Instant::now();
     let mut line = String::new();
 
-    let end_with_user_input = false;
+    let end_with_user_input = true;
     if end_with_user_input {
         println!("Press enter to stop benchmark");
         std::io::stdin().read_line(&mut line).unwrap();
@@ -148,7 +147,7 @@ fn main() {
     );
 
     let print_time = |data_micros: &Vec<f64>, method| {
-        let retire_count = data_micros.len() * ptr_count;
+        let retire_count = data_micros.len() * ptr_count * SAMPLE_SIZE;
         //The mean time for a run of `retire_count` retires
         let total_seconds = data_micros.iter().map(|micros| *micros).sum::<f64>() / 1_000_000.0;
         println!("{}:", method);
@@ -168,7 +167,7 @@ fn main() {
         writeln!(data_file, "time,").unwrap();
         for entry in data {
             //Time is the number of nanoseconds to perform `ptr_count` retire operations
-            writeln!(data_file, "{},", *entry as f64 / ptr_count as f64).unwrap();
+            writeln!(data_file, "{},", *entry as f64 / ptr_count as f64 / SAMPLE_SIZE as f64).unwrap();
         }
     };
 
@@ -187,7 +186,7 @@ fn main() {
         let before_len = retire_times.len();
         retire_times = retire_times
             .iter()
-            .map(|t| *t)
+            .copied()
             .filter(|t| (t - mean).abs() < iqr_1_5)
             .collect();
 
@@ -294,4 +293,54 @@ fn main() {
     assert_eq!(n, 0);
     assert_eq!(drops_9001.load(Ordering::SeqCst), 0);
     */
+}
+
+use std::ffi::CString;
+use std::io::{Error, ErrorKind};
+
+// Code obtained from: https://blog.lxsang.me/post/id/28
+pub fn privdrop(user: &str, group: &str) -> Result<(), Error> {
+    // the group id need to be set first, otherwise,
+    // when the user privileges drop, it is unnable to
+    // drop the group privileges
+    if let Ok(cstr) = CString::new(group.as_bytes()) {
+        let p = unsafe { libc::getgrnam(cstr.as_ptr()) };
+
+        if p.is_null() {
+            eprintln!("privdrop: Unable to getgrnam of group: {}", group);
+            return Err(Error::last_os_error());
+        }
+
+        if unsafe { libc::setgid((*p).gr_gid) } != 0 {
+            eprintln!("privdrop: Unable to setgid of group: {}", group);
+            return Err(Error::last_os_error());
+        }
+    } else {
+        return Err(Error::new(
+            ErrorKind::Other,
+            "Cannot create CString from String (group)!",
+        ));
+    }
+
+    // drop the user privileges
+    if let Ok(cstr) = CString::new(user.as_bytes()) {
+        let p = unsafe { libc::getpwnam(cstr.as_ptr()) };
+
+        if p.is_null() {
+            eprintln!("privdrop: Unable to getpwnam of user: {}", user);
+            return Err(Error::last_os_error());
+        }
+
+        if unsafe { libc::setuid((*p).pw_uid) } != 0 {
+            eprintln!("privdrop: Unable to setuid of user: {}", user);
+            return Err(Error::last_os_error());
+        }
+    } else {
+        return Err(Error::new(
+            ErrorKind::Other,
+            "Cannot create CString from String (user)!",
+        ));
+    }
+
+    Ok(())
 }

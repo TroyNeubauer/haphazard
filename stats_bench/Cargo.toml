@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-haphazard = { path = "../", default-features = false, features = ["std", "null_hash"] }
+haphazard = { path = "../", default-features = false, features = ["std", "ptr_hash"] }
 rand = "0.8"
 statrs = "0.15"
+libc = "0.2"
 
 [profile.release]
 debug = 0

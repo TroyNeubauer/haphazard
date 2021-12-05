@@ -4,7 +4,6 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
-use std::cell::Cell;
 
 #[cfg(feature = "std")]
 const SYNC_TIME_PERIOD: u64 = std::time::Duration::from_nanos(2000000000).as_nanos() as u64;
@@ -102,9 +101,9 @@ macro_rules! new {
     };
 }
 
-#[cfg(all(not(loom), feature = "std"))]
+#[cfg(all(not(loom), all(feature = "std", feature = "multiply_hash")))]
 thread_local! {
-    static SHARD_STATE: Cell<usize> = Cell::new(0);
+    static SHARD_STATE: std::cell::Cell<usize> = std::cell::Cell::new(0);
 }
 
 impl<F> Domain<F> {
@@ -618,7 +617,7 @@ impl<F> Domain<F> {
         usize::from_ne_bytes(hash) as usize & SHARD_MASK
     }
 
-    #[cfg(all(not(loom), features = "ptr_hash"))]
+    #[cfg(all(not(loom), feature = "ptr_hash"))]
     fn calc_shard(&self, input: *mut Retired) -> usize {
         (input as usize >> IGNORED_LOW_BITS) & SHARD_MASK
     }

@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2018"
 
 [features]
-std = ["ptr_hash"]
+std = []
 multiply_hash = []
 null_hash = []
 ptr_hash = []
 
-default = ["std"]
+default = ["std", "ptr_hash"]
 
 [dependencies]
 
