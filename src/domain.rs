@@ -4,6 +4,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
+use std::cell::Cell;
 
 #[cfg(feature = "std")]
 const SYNC_TIME_PERIOD: u64 = std::time::Duration::from_nanos(2000000000).as_nanos() as u64;
@@ -103,7 +104,7 @@ macro_rules! new {
 
 #[cfg(all(not(loom), feature = "std"))]
 thread_local! {
-    static SHARD_STATE: AtomicUsize = AtomicUsize::new(0);
+    static SHARD_STATE: Cell<usize> = Cell::new(0);
 }
 
 impl<F> Domain<F> {
@@ -594,7 +595,7 @@ impl<F> Domain<F> {
         #[cfg(not(feature = "std"))]
         let state = self.shard_hash_state.load(Ordering::Relaxed);
         #[cfg(feature = "std")]
-        let state = SHARD_STATE.with(|v| v.load(Ordering::Relaxed));
+        let state = SHARD_STATE.with(|v| v.get());
 
         let input = input as usize ^ state;
 
@@ -609,16 +610,22 @@ impl<F> Domain<F> {
         new_state.copy_from_slice(&mul_result[USIZE_BYTES..(2 * USIZE_BYTES)]);
 
         #[cfg(not(feature = "std"))]
-        self.shard_hash_state.store(usize::from_ne_bytes(new_state), Ordering::Relaxed);
+        self.shard_hash_state
+            .store(usize::from_ne_bytes(new_state), Ordering::Relaxed);
         #[cfg(feature = "std")]
-        SHARD_STATE.with(|v| v.store(usize::from_ne_bytes(new_state), Ordering::Relaxed));
+        SHARD_STATE.with(|v| v.set(usize::from_ne_bytes(new_state)));
 
         usize::from_ne_bytes(hash) as usize & SHARD_MASK
     }
 
-    #[cfg(all(not(loom), not(feature = "multiply_hash")))]
+    #[cfg(all(not(loom), not(any(features = "null_hash", feature = "multiply_hash"))))]
     fn calc_shard(&self, input: *mut Retired) -> usize {
         (input as usize >> IGNORED_LOW_BITS) & SHARD_MASK
+    }
+
+    #[cfg(all(not(loom), feature = "null_hash"))]
+    fn calc_shard(&self, _input: *mut Retired) -> usize {
+        0
     }
 
     #[cfg(loom)]

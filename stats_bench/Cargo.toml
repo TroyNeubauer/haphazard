@@ -1,0 +1,9 @@
+[package]
+name = "stats_bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+haphazard = { path = "../", features = ["multiply_hash"] }
+rand = "0.8"
+statrs = "0.15"

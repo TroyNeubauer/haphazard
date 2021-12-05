@@ -33,5 +33,4 @@ pub use deleter::{deleters, Deleter, Reclaim};
 pub use domain::Domain;
 pub use holder::HazardPointer;
 pub use object::{HazPtrObject, HazPtrObjectWrapper};
-
 pub(crate) use record::HazPtrRecord;
