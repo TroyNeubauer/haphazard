@@ -7,7 +7,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicPtr, AtomicUsize};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, Duration};
 
 use rand::Rng;
 
@@ -40,47 +40,50 @@ fn main() {
     }
     let values = Box::leak(values.into_boxed_slice());
 
-    let writers: Vec<_> = (0..WRITER_COUNT).map(|_| {
-        std::thread::spawn(|| {
-            let mut retire_count: usize = 0;
-            let mut rng = rand::thread_rng();
-            let mut times = Vec::new();
-            let mut last_average = None;
+    let writers: Vec<_> = (0..WRITER_COUNT)
+        .map(|_| {
+            std::thread::spawn(|| {
+                let mut retire_count: usize = 0;
+                let mut rng = rand::thread_rng();
+                let mut times = Vec::new();
+                let mut last_average = None;
 
-            while RUNNING.load(Ordering::Relaxed) {
-                let start = Instant::now();
-                for _ in 0..values.len() {
-                    let i = rng.gen_range(0..values.len());
-                    let new_num = rng.gen::<usize>();
-                    let new_ptr =
-                        Box::into_raw(Box::new(HazPtrObjectWrapper::with_global_domain(new_num)));
+                while RUNNING.load(Ordering::Relaxed) {
+                    let start = Instant::now();
+                    for _ in 0..values.len() {
+                        let i = rng.gen_range(0..values.len());
+                        let new_num = rng.gen::<usize>();
+                        let new_ptr = Box::into_raw(Box::new(
+                            HazPtrObjectWrapper::with_global_domain(new_num),
+                        ));
 
-                    let ptr = &values[i];
-                    let now_garbage = ptr.swap(new_ptr, Ordering::AcqRel);
-                    // Safety:
-                    //
-                    //  1. The pointer came from Box, so is valid.
-                    //  2. The old value is no longer accessible.
-                    //  3. The deleter is valid for Box types.
-                    unsafe { now_garbage.retire(&deleters::drop_box) };
-                    retire_count += 1;
-                }
-                let time = start.elapsed().as_nanos() as u64 as f64 / 1_000.0;
-                times.push(time);
-
-                const SAMPLE_SIZE: usize = 1024;
-                if times.len() % SAMPLE_SIZE == 0 {
-                    let avg: f64 = &times[(times.len() - SAMPLE_SIZE)..].iter().sum::<f64>()
-                        / SAMPLE_SIZE as f64;
-                    if let Some(last) = last_average.take() {
-                        println!("Last {}, now {}", last, avg);
+                        let ptr = &values[i];
+                        let now_garbage = ptr.swap(new_ptr, Ordering::AcqRel);
+                        // Safety:
+                        //
+                        //  1. The pointer came from Box, so is valid.
+                        //  2. The old value is no longer accessible.
+                        //  3. The deleter is valid for Box types.
+                        unsafe { now_garbage.retire(&deleters::drop_box) };
+                        retire_count += 1;
                     }
-                    last_average = Some(avg);
+                    let time = start.elapsed().as_nanos() as u64 as f64 / 1_000.0;
+                    times.push(time);
+
+                    const SAMPLE_SIZE: usize = 1024;
+                    if times.len() % SAMPLE_SIZE == 0 {
+                        let avg: f64 = &times[(times.len() - SAMPLE_SIZE)..].iter().sum::<f64>()
+                            / SAMPLE_SIZE as f64;
+                        if let Some(last) = last_average.take() {
+                            println!("Last {}, now {}", last, avg);
+                        }
+                        last_average = Some(avg);
+                    }
                 }
-            }
-            (retire_count, times)
+                (retire_count, times)
+            })
         })
-    }).collect();
+        .collect();
 
     let readers: Vec<_> = (0..READER_COUNT)
         .map(|_| {
@@ -116,10 +119,17 @@ fn main() {
     let start = Instant::now();
     let mut line = String::new();
 
-    println!("Press enter to stop benchmark");
-    std::io::stdin().read_line(&mut line).unwrap();
+    let end_with_user_input = false;
+    if end_with_user_input {
+        println!("Press enter to stop benchmark");
+        std::io::stdin().read_line(&mut line).unwrap();
+        println!();
+    } else {
+        //Run for 20 minutes
+        println!("Running benchmark for 20 minutes");
+        std::thread::sleep(Duration::from_secs(60 * 20));
+    }
     RUNNING.store(false, Ordering::SeqCst);
-    println!();
 
     let mut retire_count = 0;
     let mut retire_times = Vec::new();

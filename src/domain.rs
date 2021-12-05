@@ -618,7 +618,7 @@ impl<F> Domain<F> {
         usize::from_ne_bytes(hash) as usize & SHARD_MASK
     }
 
-    #[cfg(all(not(loom), not(any(features = "null_hash", feature = "multiply_hash"))))]
+    #[cfg(all(not(loom), features = "ptr_hash"))]
     fn calc_shard(&self, input: *mut Retired) -> usize {
         (input as usize >> IGNORED_LOW_BITS) & SHARD_MASK
     }

@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2018"
 
 [features]
-std = []
+std = ["ptr_hash"]
 multiply_hash = []
 null_hash = []
+ptr_hash = []
 
 default = ["std"]
 

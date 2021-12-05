@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-haphazard = { path = "../", features = ["multiply_hash"] }
+haphazard = { path = "../", default-features = false, features = ["std", "null_hash"] }
 rand = "0.8"
 statrs = "0.15"
+
+[profile.release]
+debug = 0
+lto = true
+codegen-units = 1
