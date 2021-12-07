@@ -45,7 +45,7 @@ fn main() {
             const READER_HAZPTR_COUNT: usize = 1024 * 2;
             const READER_COUNT: usize = 4;
             const WRITER_COUNT: usize = 2;
-            const CHECK_INTERVAL: usize = 1024;
+            const CHECK_INTERVAL: usize = 1024 * 50;
 
             // How many retires we do in this benchmark
             const RETIRES_WANTED: usize = 50_000_000;
@@ -90,14 +90,25 @@ fn main() {
                             let total_retired =
                                 TOTAL_RETIRED.fetch_add(retire_count, Ordering::SeqCst);
                             if total_retired > RETIRES_WANTED {
-                                RUNNING.store(false, Ordering::SeqCst);
-                                break;
+                                match RUNNING.compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst) {
+                                    Ok(_) => break,
+                                    Err(running) => {
+                                        if running {
+                                            panic!("Compare exchange failed and running set to true?");
+                                        } else {
+                                            //Someone else got here before us
+                                            break;
+                                        }
+                                    }
+                                }
                             }
-                            println!(".");
+                            print!(".");
+                            let _ = std::io::stdout().flush();
                         }
+                        let duration = start.elapsed();
                         println!("Writer exiting");
 
-                        start.elapsed()
+                        duration
                     })
                 })
                 .collect();
@@ -112,7 +123,7 @@ fn main() {
                             .map(|_| HazardPointer::make_in_domain(domain_ref));
                         let mut h_index = 0;
 
-                        while RUNNING.load(Ordering::Acquire) {
+                        while RUNNING.load(Ordering::SeqCst) {
                             for _ in 0..CHECK_INTERVAL {
                                 let i = rng.gen_range(0..values.len());
                                 let h = &mut hazptrs[h_index];
@@ -138,6 +149,7 @@ fn main() {
             while RUNNING.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(1000));
                 let shard_counts = domain_ref.count_shards();
+                println!();
                 for count in shard_counts {
                     print!("{} ", count);
                 }
