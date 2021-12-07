@@ -536,7 +536,7 @@ impl<F> Domain<F> {
         }
     }
 
-    fn reclaim_all_objects(&mut self) {
+    pub fn reclaim_all_objects(&mut self) {
         for i in 0..NUM_SHARDS {
             let head = self.untagged[i].pop_all();
             // Safety: &mut self implies that there are no active Hazard Pointers.
@@ -630,6 +630,14 @@ impl<F> Domain<F> {
     #[cfg(loom)]
     fn calc_shard(&self, _input: *mut Retired) -> usize {
         SHARD.fetch_add(1, Ordering::Relaxed) & SHARD_MASK
+    }
+
+    pub fn count_shards(&self) -> [usize; NUM_SHARDS] {
+        let mut result = [0; NUM_SHARDS];
+        for (i, shard) in self.untagged.iter().enumerate() {
+            result[i] = shard.len();
+        }
+        result
     }
 }
 
@@ -728,6 +736,17 @@ impl RetiredList {
 
     fn is_empty(&self) -> bool {
         self.head.load(Ordering::Relaxed).is_null()
+    }
+
+    fn len(&self) -> usize {
+        let mut ptr = self.head.load(Ordering::Relaxed);
+        let mut len = 0;
+        while !ptr.is_null() {
+            // # Safety ptr is non-null
+            ptr = unsafe { &*ptr }.next.load(Ordering::Relaxed);
+            len += 1;
+        }
+        len
     }
 }
 
