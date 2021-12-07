@@ -5,17 +5,9 @@ use std::io::Write;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicPtr, AtomicUsize};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
-
-struct CountDrops(Arc<AtomicUsize>);
-impl Drop for CountDrops {
-    fn drop(&mut self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
-    }
-}
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
 static TOTAL_RETIRED: AtomicUsize = AtomicUsize::new(0);
@@ -68,7 +60,7 @@ fn main() {
                         let mut rng = rand::thread_rng();
 
                         let start = Instant::now();
-                        while RUNNING.load(Ordering::SeqCst) {
+                        while RUNNING.load(Ordering::Relaxed) {
                             let mut retire_count: usize = 0;
                             for _ in 0..CHECK_INTERVAL {
                                 let i = rng.gen_range(0..values.len());
@@ -102,11 +94,9 @@ fn main() {
                                     }
                                 }
                             }
-                            print!(".");
                             let _ = std::io::stdout().flush();
                         }
                         let duration = start.elapsed();
-                        println!("Writer exiting");
 
                         duration
                     })
@@ -123,7 +113,7 @@ fn main() {
                             .map(|_| HazardPointer::make_in_domain(domain_ref));
                         let mut h_index = 0;
 
-                        while RUNNING.load(Ordering::SeqCst) {
+                        while RUNNING.load(Ordering::Relaxed) {
                             for _ in 0..CHECK_INTERVAL {
                                 let i = rng.gen_range(0..values.len());
                                 let h = &mut hazptrs[h_index];
@@ -140,16 +130,14 @@ fn main() {
                                 h_index %= READER_HAZPTR_COUNT;
                             }
                         }
-                        println!("Reader exiting");
                         std::hint::black_box(sum);
                     })
                 })
                 .collect();
 
-            while RUNNING.load(Ordering::SeqCst) {
+            while RUNNING.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(1000));
                 let shard_counts = domain_ref.count_shards();
-                println!();
                 for count in shard_counts {
                     print!("{} ", count);
                 }
@@ -163,7 +151,6 @@ fn main() {
 
             let mut total_time = Duration::from_nanos(0);
             for writer in writers {
-                println!("Joining writer");
                 let run_duration = writer.join().unwrap();
                 total_time += run_duration;
             }
