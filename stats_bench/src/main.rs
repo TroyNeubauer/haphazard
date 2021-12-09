@@ -36,7 +36,7 @@ fn main() {
 
             const READER_HAZPTR_COUNT: usize = 1024 * 2;
             const READER_COUNT: usize = 4;
-            const WRITER_COUNT: usize = 2;
+            const WRITER_COUNT: usize = 4;
             const CHECK_INTERVAL: usize = 1024 * 50;
 
             // How many retires we do in this benchmark
