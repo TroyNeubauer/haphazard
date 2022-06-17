@@ -460,6 +460,21 @@ impl<T, F, P> AtomicPtr<T, F, P> {
         unsafe { hp.protect(&self.0) }
     }
 
+    /// Loads the value from the stored pointer and guards it using the given hazard pointer.
+    ///
+    /// The guard ensures that the loaded `T` will remain valid for as long as you hold a reference
+    /// to it.
+    pub fn protect_ptr<'hp, 'd>(
+        &'_ self,
+        hp: &'hp mut HazardPointer<'d, F>,
+    ) -> Option<(NonNull<T>, PhantomData<&'hp T>)>
+    where
+        T: Sync + 'hp,
+        F: 'static,
+    {
+        hp.protect_ptr(&self.0)
+    }
+
     /// Returns a mutable reference to the underlying pointer.
     ///
     /// # Safety
